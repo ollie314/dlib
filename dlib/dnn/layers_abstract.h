@@ -348,6 +348,16 @@ namespace dlib
                 - returns the parameters that define the behavior of forward().
         !*/
 
+
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
+        /*!
+            These two functions are optional.  If provided, they should map between
+            (column,row) coordinates in input and output tensors of forward().  Providing
+            these functions allows you to use global utility functions like
+            input_tensor_to_output_tensor().
+        !*/
+
     };
 
     std::ostream& operator<<(std::ostream& out, const EXAMPLE_COMPUTATIONAL_LAYER_& item);
@@ -527,6 +537,62 @@ namespace dlib
                 - val >= 0
             ensures
                 - #get_bias_weight_decay_multiplier() == val
+        !*/
+
+        alias_tensor_const_instance get_weights(
+        ) const;
+        /*!
+            ensures
+                - returns an alias of get_layer_params(), containing the weights matrix of
+                  the fully connected layer.
+                - #get_weights().num_samples() is the number of elements in input sample,
+                  i.e. sublayer's output's k * nc * nr.
+                - #get_bias().k() == #get_num_outputs()
+                - if get_bias_mode() == FC_HAS_BIAS:
+                    - #get_layer_params().size() == (#get_weights().size() + #get_biases().size())
+                - else:
+                    - #get_layer_params().size() == #get_weights().size()
+        !*/
+
+        alias_tensor_instance get_weights(
+        );
+        /*!
+            ensures
+                - returns an alias of get_layer_params(), containing the weights matrix of
+                  the fully connected layer.
+                - #get_weights().num_samples() is the number of elements in input sample,
+                  i.e. sublayer's output's k * nc * nr.
+                - #get_bias().k() == #get_num_outputs()
+                - if get_bias_mode() == FC_HAS_BIAS:
+                    - #get_layer_params().size() == (#get_weights().size() + #get_biases().size())
+                - else:
+                    - #get_layer_params().size() == #get_weights().size()
+        !*/
+
+        alias_tensor_const_instance get_biases(
+        ) const;
+        /*!
+            requires
+                - #get_bias_mode() == FC_HAS_BIAS
+            ensures
+                - returns an alias of get_layer_params(), containing the bias vector of
+                  the fully connected layer.
+                - #get_bias().num_samples() == 1
+                - #get_bias().k() == #get_num_outputs()
+                - #get_layer_params().size() == (#get_weights().size() + #get_biases().size())
+        !*/
+
+        alias_tensor_instance get_biases(
+        );
+        /*!
+            requires
+                - #get_bias_mode() == FC_HAS_BIAS
+            ensures
+                - returns an alias of get_layer_params(), containing the bias vector of
+                  the fully connected layer.
+                - #get_bias().num_samples() == 1
+                - #get_bias().k() == #get_num_outputs()
+                - #get_layer_params().size() == (#get_weights().size() + #get_biases().size())
         !*/
 
         template <typename SUBNET> void setup (const SUBNET& sub);
@@ -740,6 +806,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         template <typename SUBNET> void forward(const SUBNET& sub, resizable_tensor& output);
         template <typename SUBNET> void backward(const tensor& gradient_input, SUBNET& sub, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -798,6 +866,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         void forward_inplace(const tensor& input, tensor& output);
         void backward_inplace(const tensor& gradient_input, tensor& data_grad, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -850,6 +920,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         void forward_inplace(const tensor& input, tensor& output);
         void backward_inplace(const tensor& gradient_input, tensor& data_grad, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -906,7 +978,7 @@ namespace dlib
         /*!
             ensures
                 - #get_mode() == mode
-                - #get_running_stats_window_size()      == 1000
+                - #get_running_stats_window_size()      == 100
                 - #get_learning_rate_multiplier()       == 1
                 - #get_weight_decay_multiplier()        == 0
                 - #get_bias_learning_rate_multiplier()  == 1
@@ -921,6 +993,7 @@ namespace dlib
         /*!
             requires
                 - eps > 0
+                - window_size > 0
             ensures
                 - #get_mode() == mode 
                 - #get_running_stats_window_size()     == window_size
@@ -967,6 +1040,16 @@ namespace dlib
                   initialize an affine_ layer that is constructed from a bn_ layer.  This
                   function returns the effective number of recent samples used to compute
                   the running average.
+        !*/
+
+        void set_running_stats_window_size (
+            unsigned long new_window_size
+        );
+        /*!
+            requires
+                - new_window_size > 0
+            ensures
+                - #get_running_stats_window_size() == new_window_size
         !*/
 
         double get_learning_rate_multiplier(
@@ -1048,6 +1131,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         template <typename SUBNET> void forward(const SUBNET& sub, resizable_tensor& output);
         template <typename SUBNET> void backward(const tensor& gradient_input, SUBNET& sub, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -1059,6 +1144,23 @@ namespace dlib
     using bn_con = add_layer<bn_<CONV_MODE>, SUBNET>;
     template <typename SUBNET>
     using bn_fc = add_layer<bn_<FC_MODE>, SUBNET>;
+
+// ----------------------------------------------------------------------------------------
+
+    template <typename net_type>
+    void set_all_bn_running_stats_window_sizes (
+        const net_type& net,
+        unsigned long new_window_size
+    );
+    /*!
+        requires
+            - new_window_size > 0
+            - net_type is an object of type add_layer, add_loss_layer, add_skip_layer, or
+              add_tag_layer.
+        ensures
+            - Sets the get_running_stats_window_size() field of all bn_ layers in net to
+              new_window_size.
+    !*/
 
 // ----------------------------------------------------------------------------------------
 
@@ -1139,6 +1241,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         void forward_inplace(const tensor& input, tensor& output);
         void backward_inplace(const tensor& computed_output, const tensor& gradient_input, tensor& data_grad, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -1273,6 +1377,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         template <typename SUBNET> void forward(const SUBNET& sub, resizable_tensor& output);
         template <typename SUBNET> void backward(const tensor& computed_output, const tensor& gradient_input, SUBNET& sub, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -1416,6 +1522,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         template <typename SUBNET> void forward(const SUBNET& sub, resizable_tensor& output);
         template <typename SUBNET> void backward(const tensor& computed_output, const tensor& gradient_input, SUBNET& sub, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -1461,6 +1569,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         void forward_inplace(const tensor& input, tensor& output);
         void backward_inplace(const tensor& computed_output, const tensor& gradient_input, tensor& data_grad, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -1514,6 +1624,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         void forward_inplace(const tensor& input, tensor& output);
         void backward_inplace(const tensor& computed_output, const tensor& gradient_input, tensor& data_grad, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -1545,6 +1657,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         void forward_inplace(const tensor& input, tensor& output);
         void backward_inplace(const tensor& computed_output, const tensor& gradient_input, tensor& data_grad, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -1578,6 +1692,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         void forward_inplace(const tensor& input, tensor& output);
         void backward_inplace(const tensor& computed_output, const tensor& gradient_input, tensor& data_grad, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const; 
         tensor& get_layer_params(); 
         /*!
@@ -1729,6 +1845,8 @@ namespace dlib
         template <typename SUBNET> void setup (const SUBNET& sub);
         template <typename SUBNET> void forward(const SUBNET& sub, resizable_tensor& output);
         template <typename SUBNET> void backward(const tensor& gradient_input, SUBNET& sub, tensor& params_grad);
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
         const tensor& get_layer_params() const;
         tensor& get_layer_params();
         /*!

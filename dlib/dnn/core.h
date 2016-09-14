@@ -35,7 +35,7 @@ namespace dlib
         ) { return obj.get_learning_rate_multiplier(); }
 
         template <typename T>
-        double get_learning_rate_multiplier ( const T& obj, general_) { return 1; }
+        double get_learning_rate_multiplier ( const T& , general_) { return 1; }
     }
     template <typename T>
     double get_learning_rate_multiplier(const T& obj) { return impl::get_learning_rate_multiplier(obj, special_()); }
@@ -51,7 +51,7 @@ namespace dlib
         ) { return obj.get_weight_decay_multiplier(); }
 
         template <typename T>
-        double get_weight_decay_multiplier ( const T& obj, general_) { return 1; }
+        double get_weight_decay_multiplier ( const T& , general_) { return 1; }
     }
     template <typename T>
     double get_weight_decay_multiplier(const T& obj) { return impl::get_weight_decay_multiplier(obj, special_()); }
@@ -861,7 +861,7 @@ namespace dlib
         template <typename solver_type>
         void update_parameters(sstack<solver_type> solvers, double learning_rate)
         {
-            DLIB_CASSERT(solvers.size()>=num_computational_layers,"");
+            DLIB_CASSERT(solvers.size()>=num_computational_layers);
             // Don't try to adjust the parameters if this layer doesn't have any or the
             // learning rate is disabled for this layer.
             if (params_grad.size() != 0 && get_learning_rate_multiplier(details) != 0)
@@ -1158,7 +1158,7 @@ namespace dlib
         const tensor& forward (const tensor& x)
         {
             DLIB_CASSERT(sample_expansion_factor() != 0, "You must call to_tensor() before this function can be used.");
-            DLIB_CASSERT(x.num_samples()%sample_expansion_factor() == 0,"");
+            DLIB_CASSERT(x.num_samples()%sample_expansion_factor() == 0);
             subnet_wrapper wsub(x, grad_final, _sample_expansion_factor);
             if (!this_layer_setup_called)
             {
@@ -1224,7 +1224,7 @@ namespace dlib
         template <typename solver_type>
         void update_parameters(sstack<solver_type> solvers, double learning_rate)
         {
-            DLIB_CASSERT(solvers.size()>=num_computational_layers,"");
+            DLIB_CASSERT(solvers.size()>=num_computational_layers);
             // Don't try to adjust the parameters if this layer doesn't have any or the
             // learning rate is disabled for this layer.
             if (params_grad.size() != 0 && get_learning_rate_multiplier(details) != 0) 
@@ -1615,7 +1615,7 @@ namespace dlib
             size_t i 
         ) const
         { 
-            DLIB_CASSERT(i < num_repetitions(), "");
+            DLIB_CASSERT(i < num_repetitions());
             return details[i]; 
         }
 
@@ -1623,7 +1623,7 @@ namespace dlib
             size_t i 
         ) 
         { 
-            DLIB_CASSERT(i < num_repetitions(), "");
+            DLIB_CASSERT(i < num_repetitions());
             return details[i]; 
         }
 
@@ -2190,11 +2190,25 @@ namespace dlib
         {
         }
 
+        template <typename T, typename ...U>
+        struct disable_forwarding_constr 
+        {
+            const static bool value = std::is_constructible<LOSS_DETAILS,T>::value;
+        };
         template <typename ...T>
+        struct disable_forwarding_constr<add_loss_layer<T...>>
+        {
+            const static bool value = true;
+        };
+
+        template <
+            typename ...T, 
+            typename = typename std::enable_if<!disable_forwarding_constr<typename std::remove_reference<T>::type...>::value>::type
+            >
         add_loss_layer(
-            T ...args
+            T&& ...args
         ) : 
-            subnetwork(std::move(args)...)
+            subnetwork(std::forward<T>(args)...)
         {
         }
 
@@ -2603,12 +2617,43 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
+
+    namespace dimpl
+    {
+        template <typename T>
+        T& get_input_details (
+            T& net
+        ) 
+        { 
+            return net; 
+        } 
+
+        template <typename T, bool is_first, typename enabled>
+        auto get_input_details (
+            dimpl::subnet_wrapper<T,is_first,enabled>& net
+        ) -> decltype(net.layer_details())&
+        {
+            return net.layer_details();
+        }
+
+        template <typename T, bool is_first, typename enabled>
+        auto get_input_details (
+            const dimpl::subnet_wrapper<T,is_first,enabled>& net
+        ) -> decltype(net.layer_details())&
+        {
+            return net.layer_details();
+        }
+    }
+
     template <typename net_type>
     auto input_layer (
         net_type& net
-    ) -> decltype(layer<net_type::num_layers-1>(net))&
+    ) -> decltype(dimpl::get_input_details(layer<net_type::num_layers-1>(net)))&
     {
-        return layer<net_type::num_layers-1>(net);
+        // Calling input_layer() on a subnet_wrapper is a little funny since the behavior of
+        // .subnet() returns another subnet_wrapper rather than an input details object as it
+        // does in add_layer.
+        return dimpl::get_input_details(layer<net_type::num_layers-1>(net));
     }
 
 // ----------------------------------------------------------------------------------------
@@ -3323,6 +3368,39 @@ namespace dlib
             }
         };
 
+        template <size_t i, size_t num>
+        struct vl_loop_backwards
+        {
+            template <
+                typename net_type,
+                typename visitor
+                >
+            static void visit(
+                net_type& net,
+                visitor&& v
+            )
+            {
+                vl_loop<i+1, num>::visit(net,v);
+                v(i, layer<i>(net));
+            }
+        };
+
+        template <size_t num>
+        struct vl_loop_backwards<num,num>
+        {
+            template <
+                typename net_type,
+                typename visitor
+                >
+            static void visit(
+                net_type&,
+                visitor&& 
+            )
+            {
+                // Base case of recursion.  Don't do anything.
+            }
+        };
+
     }
 
     template <
@@ -3335,6 +3413,50 @@ namespace dlib
     )
     {
         impl::vl_loop<0, net_type::num_layers>::visit(net, v);
+    }
+
+    template <
+        typename net_type,
+        typename visitor
+        >
+    void visit_layers_backwards(
+        net_type& net,
+        visitor v
+    )
+    {
+        impl::vl_loop_backwards<0, net_type::num_layers>::visit(net, v);
+    }
+
+    template <
+        size_t begin,
+        size_t end,
+        typename net_type,
+        typename visitor
+        >
+    void visit_layers_range(
+        net_type& net,
+        visitor v
+    )
+    {
+        static_assert(begin <= end, "Invalid range");
+        static_assert(end <= net_type::num_layers, "Invalid range");
+        impl::vl_loop<begin,end>::visit(net, v);
+    }
+
+    template <
+        size_t begin,
+        size_t end,
+        typename net_type,
+        typename visitor
+        >
+    void visit_layers_backwards_range(
+        net_type& net,
+        visitor v
+    )
+    {
+        static_assert(begin <= end, "Invalid range");
+        static_assert(end <= net_type::num_layers, "Invalid range");
+        impl::vl_loop_backwards<begin,end>::visit(net, v);
     }
 
 // ----------------------------------------------------------------------------------------

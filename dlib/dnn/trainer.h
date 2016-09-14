@@ -20,6 +20,8 @@
 #include <cstdio>
 #include <set>
 #include <future>
+#include <exception>
+#include <mutex>
 
 namespace dlib
 {
@@ -132,6 +134,7 @@ namespace dlib
         ) const 
         { 
             wait_for_thread_to_pause();
+            propagate_exception();
             return net; 
         }
 
@@ -143,7 +146,7 @@ namespace dlib
             unsigned long batch_size 
         )
         {
-            DLIB_CASSERT(batch_size > 0,"");
+            DLIB_CASSERT(batch_size > 0);
             mini_batch_size = batch_size;
         }
 
@@ -154,7 +157,7 @@ namespace dlib
             unsigned long num
         )  
         {
-            DLIB_CASSERT(num > 0,"");
+            DLIB_CASSERT(num > 0);
             max_num_epochs = num;
         }
 
@@ -175,6 +178,7 @@ namespace dlib
         ) const 
         { 
             wait_for_thread_to_pause();
+            propagate_exception();
             return devices[0]->solvers; 
         }
 
@@ -183,7 +187,22 @@ namespace dlib
             const std::vector<label_type>& labels 
         )
         {
-            DLIB_CASSERT(data.size() == labels.size() && data.size() > 0, "");
+            DLIB_CASSERT(data.size() == labels.size());
+
+            train_one_step(data.begin(), data.end(), labels.begin());
+        }
+
+        template <
+            typename data_iterator,
+            typename label_iterator
+            >
+        void train_one_step (
+            data_iterator dbegin, 
+            data_iterator dend,
+            label_iterator lbegin
+        )
+        {
+            DLIB_CASSERT(std::distance(dbegin, dend) > 0);
 
             if (verbose)
             {
@@ -200,7 +219,7 @@ namespace dlib
                 }
             }
             sync_to_disk();
-            send_job(data.begin(), data.end(), labels.begin());
+            send_job(dbegin, dend, lbegin);
 
             ++train_one_step_calls;
         }
@@ -209,7 +228,18 @@ namespace dlib
             const std::vector<input_type>& data
         )
         {
-            DLIB_CASSERT(data.size() > 0, "");
+            train_one_step(data.begin(), data.end());
+        }
+
+        template <
+            typename data_iterator
+            >
+        void train_one_step (
+            data_iterator dbegin, 
+            data_iterator dend
+        )
+        {
+            DLIB_CASSERT(std::distance(dbegin, dend) > 0);
             if (verbose)
             {
                 using namespace std::chrono;
@@ -225,7 +255,7 @@ namespace dlib
                 }
             }
             sync_to_disk();
-            send_job(data.begin(), data.end());
+            send_job(dbegin, dend);
             ++train_one_step_calls;
         }
 
@@ -234,7 +264,7 @@ namespace dlib
             const std::vector<label_type>& labels 
         ) 
         {
-            DLIB_CASSERT(data.size() == labels.size() && data.size() > 0, "");
+            DLIB_CASSERT(data.size() == labels.size() && data.size() > 0);
 
             bool updated_the_network = false;
             // The reason these two loops don't initialize their counter variables but
@@ -290,7 +320,7 @@ namespace dlib
             const std::vector<input_type>& data
         ) 
         {
-            DLIB_CASSERT(data.size() > 0, "");
+            DLIB_CASSERT(data.size() > 0);
 
             const bool has_unsupervised_loss = std::is_same<no_label_type, label_type>::value; 
             static_assert(has_unsupervised_loss, 
@@ -378,7 +408,7 @@ namespace dlib
             double lr
         )
         {
-            DLIB_CASSERT(lr > 0,"");
+            DLIB_CASSERT(lr > 0);
             wait_for_thread_to_pause();
             if (learning_rate != lr)
             {
@@ -399,7 +429,7 @@ namespace dlib
             double lr
         )
         {
-            DLIB_CASSERT(lr > 0,"");
+            DLIB_CASSERT(lr > 0);
             wait_for_thread_to_pause();
             lr_schedule.set_size(0);
             min_learning_rate = lr;
@@ -416,8 +446,8 @@ namespace dlib
             const matrix_exp<EXP>& schedule
         )
         {
-            DLIB_CASSERT(schedule.size() > 0,"");
-            DLIB_CASSERT(min(schedule) > 0,"");
+            DLIB_CASSERT(schedule.size() > 0);
+            DLIB_CASSERT(min(schedule) > 0);
             set_learning_rate(schedule(0,0));
             set_min_learning_rate(min(schedule));
             set_learning_rate_shrink_factor(1);
@@ -456,7 +486,7 @@ namespace dlib
             double shrink
         )
         {
-            DLIB_CASSERT(0 < shrink && shrink <= 1,"");
+            DLIB_CASSERT(0 < shrink && shrink <= 1);
             wait_for_thread_to_pause();
             lr_schedule.set_size(0);
             learning_rate_shrink = shrink;
@@ -663,10 +693,12 @@ namespace dlib
                 }
             }
         }
-        catch(std::exception& e)
+        catch(...)
         {
-            std::cerr << e.what() << std::endl;
-            throw;
+            // If an exception happens then permanently disable the trainer object.
+            job_pipe.disable();
+            std::lock_guard<std::mutex> lock(eptr_mutex);
+            eptr = std::current_exception();
         }
 
         void wait_for_thread_to_pause() const
@@ -847,6 +879,7 @@ namespace dlib
             label_iterator lbegin
         )
         {
+            propagate_exception();
             size_t num = std::distance(dbegin, dend);
             size_t devs = devices.size();
             job.t.resize(devs);
@@ -934,6 +967,14 @@ namespace dlib
         long lr_schedule_pos;
         unsigned long gradient_check_budget;
 
+        std::exception_ptr eptr;
+        mutable std::mutex eptr_mutex;
+        void propagate_exception() const
+        {
+            std::lock_guard<std::mutex> lock(eptr_mutex);
+            if (eptr)
+                std::rethrow_exception(eptr);
+        }
 
     };
 

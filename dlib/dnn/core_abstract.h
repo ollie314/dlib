@@ -660,7 +660,7 @@ namespace dlib
         ); 
         /*!
             ensures
-                - #loss_details() == layer_det
+                - #loss_details() == loss_details_type(layer_det)
                 - #subnet()       == subnet_type(args)
         !*/
 
@@ -671,16 +671,19 @@ namespace dlib
         );
         /*!
             ensures
-                - #loss_details() == layer_det
+                - #loss_details() == loss_details_type(layer_det)
                 - #subnet()       == subnet_type(args)
         !*/
 
         template <typename ...T>
         add_loss_layer(
-            T ...args
+            T&& ...args
         ); 
         /*!
             ensures
+                - This version of the constructor is only called if loss_details_type can't
+                  be constructed from the first thing in args.  In this case, the args are
+                  simply passed on to the sub layers in their entirety.
                 - #loss_details() == loss_details_type()
                 - #subnet()       == subnet_type(args)
         !*/
@@ -1393,6 +1396,7 @@ namespace dlib
             - returns the input later of the given network object.  Specifically, this
               function is equivalent to calling:
                 layer<net_type::num_layers-1>(net);
+              That is, you get the input layer details object for the network.
     !*/
 
 // ----------------------------------------------------------------------------------------
@@ -1486,6 +1490,89 @@ namespace dlib
 
                 for (size_t i = 0; i < net_type::num_layers; ++i)
                     v(i, layer<i>(net));
+    !*/
+
+    template <
+        typename net_type,
+        typename visitor
+        >
+    void visit_layers_backwards(
+        net_type& net,
+        visitor v
+    );
+    /*!
+        requires
+            - net_type is an object of type add_layer, add_loss_layer, add_skip_layer, or
+              add_tag_layer.
+            - v is a function object with a signature equivalent to: 
+                v(size_t idx, any_net_type& t)
+              That is, it must take a size_t and then any of the network types such as
+              add_layer, add_loss_layer, etc.
+        ensures
+            - Loops over all the layers in net and calls v() on them.  The loop happens in
+              the reverse order of visit_layers().  To be specific, this function
+              essentially performs the following:
+
+                for (size_t i = net_type::num_layers; i != 0; --i)
+                    v(i-1, layer<i-1>(net));
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        size_t begin,
+        size_t end,
+        typename net_type,
+        typename visitor
+        >
+    void visit_layers_range(
+        net_type& net,
+        visitor v
+    );
+    /*!
+        requires
+            - net_type is an object of type add_layer, add_loss_layer, add_skip_layer, or
+              add_tag_layer.
+            - v is a function object with a signature equivalent to: 
+                v(size_t idx, any_net_type& t)
+              That is, it must take a size_t and then any of the network types such as
+              add_layer, add_loss_layer, etc.
+            - begin <= end <= net_type::num_layers
+        ensures
+            - Loops over the layers in the range [begin,end) in net and calls v() on them.
+              The loop happens in the reverse order of visit_layers().  To be specific,
+              this function essentially performs the following:
+
+                for (size_t i = begin; i < end; ++i)
+                    v(i, layer<i>(net));
+    !*/
+
+    template <
+        size_t begin,
+        size_t end,
+        typename net_type,
+        typename visitor
+        >
+    void visit_layers_backwards_range(
+        net_type& net,
+        visitor v
+    );
+    /*!
+        requires
+            - net_type is an object of type add_layer, add_loss_layer, add_skip_layer, or
+              add_tag_layer.
+            - v is a function object with a signature equivalent to: 
+                v(size_t idx, any_net_type& t)
+              That is, it must take a size_t and then any of the network types such as
+              add_layer, add_loss_layer, etc.
+            - begin <= end <= net_type::num_layers
+        ensures
+            - Loops over the layers in the range [begin,end) in net and calls v() on them.
+              The loop happens in the reverse order of visit_layers_range().  To be specific,
+              this function essentially performs the following:
+
+                for (size_t i = end; i != begin; --i)
+                    v(i-1, layer<i-1>(net));
     !*/
 
 // ----------------------------------------------------------------------------------------

@@ -69,6 +69,23 @@ namespace dlib
         void set_bias_learning_rate_multiplier(double val) { bias_learning_rate_multiplier = val; }
         void set_bias_weight_decay_multiplier(double val)  { bias_weight_decay_multiplier  = val; }
 
+        inline point map_input_to_output (
+            point p
+        ) const
+        {
+            p.x() = (p.x()+padding_x()-nc()/2)/stride_x();
+            p.y() = (p.y()+padding_y()-nr()/2)/stride_y();
+            return p;
+        }
+
+        inline point map_output_to_input (
+            point p
+        ) const
+        {
+            p.x() = p.x()*stride_x() - padding_x() + nc()/2;
+            p.y() = p.y()*stride_y() - padding_y() + nr()/2;
+            return p;
+        }
 
         con_ (
             const con_& item
@@ -317,6 +334,24 @@ namespace dlib
         long padding_y() const { return padding_y_; }
         long padding_x() const { return padding_x_; }
 
+        inline point map_input_to_output (
+            point p
+        ) const
+        {
+            p.x() = (p.x()+padding_x()-nc()/2)/stride_x();
+            p.y() = (p.y()+padding_y()-nr()/2)/stride_y();
+            return p;
+        }
+
+        inline point map_output_to_input (
+            point p
+        ) const
+        {
+            p.x() = p.x()*stride_x() - padding_x() + nc()/2;
+            p.y() = p.y()*stride_y() - padding_y() + nr()/2;
+            return p;
+        }
+
         max_pool_ (
             const max_pool_& item
         )  :
@@ -496,6 +531,24 @@ namespace dlib
         long padding_y() const { return padding_y_; }
         long padding_x() const { return padding_x_; }
 
+        inline point map_input_to_output (
+            point p
+        ) const
+        {
+            p.x() = (p.x()+padding_x()-nc()/2)/stride_x();
+            p.y() = (p.y()+padding_y()-nr()/2)/stride_y();
+            return p;
+        }
+
+        inline point map_output_to_input (
+            point p
+        ) const
+        {
+            p.x() = p.x()*stride_x() - padding_x() + nc()/2;
+            p.y() = p.y()*stride_y() - padding_y() + nr()/2;
+            return p;
+        }
+
         avg_pool_ (
             const avg_pool_& item
         )  :
@@ -665,12 +718,19 @@ namespace dlib
             bias_learning_rate_multiplier(1),
             bias_weight_decay_multiplier(1),
             eps(eps_)
-        {}
+        {
+            DLIB_CASSERT(window_size > 0, "The batch normalization running stats window size can't be 0.");
+        }
 
-        bn_() : bn_(1000) {}
+        bn_() : bn_(100) {}
 
         layer_mode get_mode() const { return mode; }
         unsigned long get_running_stats_window_size () const { return running_stats_window_size; }
+        void set_running_stats_window_size (unsigned long new_window_size ) 
+        { 
+            DLIB_CASSERT(new_window_size > 0, "The batch normalization running stats window size can't be 0.");
+            running_stats_window_size = new_window_size; 
+        }
         double get_eps() const { return eps; }
 
         double get_learning_rate_multiplier () const  { return learning_rate_multiplier; }
@@ -682,6 +742,9 @@ namespace dlib
         double get_bias_weight_decay_multiplier () const   { return bias_weight_decay_multiplier; }
         void set_bias_learning_rate_multiplier(double val) { bias_learning_rate_multiplier = val; }
         void set_bias_weight_decay_multiplier(double val)  { bias_weight_decay_multiplier  = val; }
+
+        inline point map_input_to_output (const point& p) const { return p; }
+        inline point map_output_to_input (const point& p) const { return p; }
 
 
         template <typename SUBNET>
@@ -720,8 +783,10 @@ namespace dlib
             if (sub.get_output().num_samples() > 1)
             {
                 const double decay = 1.0 - num_updates/(num_updates+1.0);
-                if (num_updates <running_stats_window_size)
-                    ++num_updates;
+                ++num_updates;
+                if (num_updates > running_stats_window_size)
+                    num_updates = running_stats_window_size;
+
                 if (mode == FC_MODE)
                     tt::batch_normalize(eps, output, means, invstds, decay, running_means, running_variances, sub.get_output(), g, b);
                 else 
@@ -811,6 +876,7 @@ namespace dlib
             else
                 out << "bn_fc   ";
             out << " eps="<<item.eps;
+            out << " running_stats_window_size="<<item.running_stats_window_size;
             out << " learning_rate_mult="<<item.learning_rate_multiplier;
             out << " weight_decay_mult="<<item.weight_decay_multiplier;
             out << " bias_learning_rate_mult="<<item.bias_learning_rate_multiplier;
@@ -826,6 +892,7 @@ namespace dlib
                 out << "<bn_fc";
 
             out << " eps='"<<item.eps<<"'";
+            out << " running_stats_window_size='"<<item.running_stats_window_size<<"'";
             out << " learning_rate_mult='"<<item.learning_rate_multiplier<<"'";
             out << " weight_decay_mult='"<<item.weight_decay_multiplier<<"'";
             out << " bias_learning_rate_mult='"<<item.bias_learning_rate_multiplier<<"'";
@@ -862,6 +929,56 @@ namespace dlib
     template <typename SUBNET>
     using bn_fc = add_layer<bn_<FC_MODE>, SUBNET>;
 
+// ----------------------------------------------------------------------------------------
+
+    namespace impl
+    {
+        class visitor_bn_running_stats_window_size
+        {
+        public:
+
+            visitor_bn_running_stats_window_size(unsigned long new_window_size_) : new_window_size(new_window_size_) {}
+
+            template <typename T>
+            void set_window_size(T&) const
+            {
+                // ignore other layer detail types
+            }
+
+            template < layer_mode mode >
+            void set_window_size(bn_<mode>& l) const
+            {
+                l.set_running_stats_window_size(new_window_size);
+            }
+
+            template<typename input_layer_type>
+            void operator()(size_t , input_layer_type& )  const
+            {
+                // ignore other layers
+            }
+
+            template <typename T, typename U, typename E>
+            void operator()(size_t , add_layer<T,U,E>& l)  const
+            {
+                set_window_size(l.layer_details());
+            }
+
+        private:
+
+            unsigned long new_window_size;
+        };
+    }
+
+    template <typename net_type>
+    void set_all_bn_running_stats_window_sizes (
+        net_type& net,
+        unsigned long new_window_size
+    )
+    {
+        visit_layers(net, impl::visitor_bn_running_stats_window_size(new_window_size));
+    }
+
+// ----------------------------------------------------------------------------------------
 // ----------------------------------------------------------------------------------------
 
     enum fc_bias_mode
@@ -967,6 +1084,30 @@ namespace dlib
             // compute the gradient for the data
             auto w = weights(params, 0);
             tt::gemm(1,sub.get_gradient_input(), 1,gradient_input,false, w,true);
+        }
+
+        alias_tensor_instance get_weights()
+        {
+            return weights(params, 0);
+        }
+
+        alias_tensor_const_instance get_weights() const
+        {
+            return weights(params, 0);
+        }
+
+        alias_tensor_instance get_biases()
+        {
+            static_assert(bias_mode == FC_HAS_BIAS, "This fc_ layer doesn't have a bias vector "
+                "to be retrieved, as per template parameter 'bias_mode'.");
+            return biases(params, weights.size());
+        }
+
+        alias_tensor_const_instance get_biases() const
+        {
+            static_assert(bias_mode == FC_HAS_BIAS, "This fc_ layer doesn't have a bias vector "
+                "to be retrieved, as per template parameter 'bias_mode'.");
+            return biases(params, weights.size());
         }
 
         const tensor& get_layer_params() const { return params; }
@@ -1092,7 +1233,7 @@ namespace dlib
             drop_rate(drop_rate_),
             rnd(std::rand())
         {
-            DLIB_CASSERT(0 <= drop_rate && drop_rate <= 1,"");
+            DLIB_CASSERT(0 <= drop_rate && drop_rate <= 1);
         }
 
         // We have to add a copy constructor and assignment operator because the rnd object
@@ -1142,6 +1283,9 @@ namespace dlib
             else
                 tt::multiply(true, data_grad, mask, gradient_input);
         }
+
+        inline point map_input_to_output (const point& p) const { return p; }
+        inline point map_output_to_input (const point& p) const { return p; }
 
         const tensor& get_layer_params() const { return params; }
         tensor& get_layer_params() { return params; }
@@ -1218,6 +1362,9 @@ namespace dlib
         {
             tt::affine_transform(output, input, val);
         } 
+
+        inline point map_input_to_output (const point& p) const { return p; }
+        inline point map_output_to_input (const point& p) const { return p; }
 
         void backward_inplace(
             const tensor& gradient_input, 
@@ -1323,6 +1470,9 @@ namespace dlib
         }
 
         layer_mode get_mode() const { return mode; }
+
+        inline point map_input_to_output (const point& p) const { return p; }
+        inline point map_output_to_input (const point& p) const { return p; }
 
         template <typename SUBNET>
         void setup (const SUBNET& sub)
@@ -1584,6 +1734,9 @@ namespace dlib
             tt::relu_gradient(data_grad, computed_output, gradient_input);
         }
 
+        inline point map_input_to_output (const point& p) const { return p; }
+        inline point map_output_to_input (const point& p) const { return p; }
+
         const tensor& get_layer_params() const { return params; }
         tensor& get_layer_params() { return params; }
 
@@ -1661,6 +1814,9 @@ namespace dlib
                 gradient_input, params, params_grad);
         }
 
+        inline point map_input_to_output (const point& p) const { return p; }
+        inline point map_output_to_input (const point& p) const { return p; }
+
         const tensor& get_layer_params() const { return params; }
         tensor& get_layer_params() { return params; }
 
@@ -1733,6 +1889,9 @@ namespace dlib
             tt::sigmoid_gradient(data_grad, computed_output, gradient_input);
         }
 
+        inline point map_input_to_output (const point& p) const { return p; }
+        inline point map_output_to_input (const point& p) const { return p; }
+
         const tensor& get_layer_params() const { return params; }
         tensor& get_layer_params() { return params; }
 
@@ -1782,6 +1941,9 @@ namespace dlib
         void setup (const SUBNET& /*sub*/)
         {
         }
+
+        inline point map_input_to_output (const point& p) const { return p; }
+        inline point map_output_to_input (const point& p) const { return p; }
 
         void forward_inplace(const tensor& input, tensor& output)
         {
@@ -1993,6 +2155,9 @@ namespace dlib
             // Gradient is split into parts for each tag layer
             impl::concat_helper_impl<TAG_TYPES...>::split(gradient_input, sub, 0);
         }
+
+        point map_input_to_output(point p) const;
+        point map_output_to_input(point p) const;
 
         const tensor& get_layer_params() const { return params; }
         tensor& get_layer_params() { return params; }

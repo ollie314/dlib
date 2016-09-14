@@ -14,6 +14,7 @@
 #include <string>
 #include <set>
 #include "../image_processing/full_object_detection.h"
+#include <utility>
 
 
 namespace dlib
@@ -84,11 +85,10 @@ namespace dlib
 // ----------------------------------------------------------------------------------------
 
     template <
-        typename image_type, 
-        typename MM
+        typename array_type
         >
     std::vector<std::vector<rectangle> > load_image_dataset (
-        array<image_type,MM>& images,
+        array_type& images,
         std::vector<std::vector<rectangle> >& object_locations,
         const image_dataset_file& source
     )
@@ -109,6 +109,7 @@ namespace dlib
         set_current_dir(get_parent_directory(file(source.get_filename())));
 
 
+        typedef typename array_type::value_type image_type;
 
 
         image_type img;
@@ -143,6 +144,56 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
+    template <
+        typename array_type
+        >
+    void load_image_dataset (
+        array_type& images,
+        std::vector<std::vector<mmod_rect> >& object_locations,
+        const image_dataset_file& source
+    )
+    {
+        images.clear();
+        object_locations.clear();
+
+        using namespace dlib::image_dataset_metadata;
+        dataset data;
+        load_image_dataset_metadata(data, source.get_filename());
+
+        // Set the current directory to be the one that contains the
+        // metadata file. We do this because the file might contain
+        // file paths which are relative to this folder.
+        locally_change_current_dir chdir(get_parent_directory(file(source.get_filename())));
+
+        typedef typename array_type::value_type image_type;
+
+        image_type img;
+        std::vector<mmod_rect> rects;
+        for (unsigned long i = 0; i < data.images.size(); ++i)
+        {
+            rects.clear();
+            for (unsigned long j = 0; j < data.images[i].boxes.size(); ++j)
+            {
+                if (source.should_load_box(data.images[i].boxes[j]))
+                {
+                    if (data.images[i].boxes[j].ignore)
+                        rects.push_back(ignored_mmod_rect(data.images[i].boxes[j].rect));
+                    else
+                        rects.push_back(mmod_rect(data.images[i].boxes[j].rect));
+                }
+            }
+
+            if (!source.should_skip_empty_images() || rects.size() != 0)
+            {
+                object_locations.push_back(std::move(rects));
+                load_image(img, data.images[i].filename);
+                images.push_back(std::move(img));
+            }
+        }
+    }
+
+// ----------------------------------------------------------------------------------------
+
 // ******* THIS FUNCTION IS DEPRECATED, you should use another version of load_image_dataset() *******
     template <
         typename image_type, 
@@ -167,11 +218,10 @@ namespace dlib
 // ----------------------------------------------------------------------------------------
 
     template <
-        typename image_type, 
-        typename MM
+        typename array_type
         >
     std::vector<std::vector<rectangle> > load_image_dataset (
-        array<image_type,MM>& images,
+        array_type& images,
         std::vector<std::vector<rectangle> >& object_locations,
         const std::string& filename
     )
@@ -180,20 +230,34 @@ namespace dlib
     }
 
 // ----------------------------------------------------------------------------------------
+
+    template <
+        typename array_type
+        >
+    void load_image_dataset (
+        array_type& images,
+        std::vector<std::vector<mmod_rect>>& object_locations,
+        const std::string& filename
+    )
+    {
+        load_image_dataset(images, object_locations, image_dataset_file(filename));
+    }
+
+// ----------------------------------------------------------------------------------------
 // ----------------------------------------------------------------------------------------
 // ----------------------------------------------------------------------------------------
 
     template <
-        typename image_type, 
-        typename MM
+        typename array_type
         >
     std::vector<std::vector<rectangle> > load_image_dataset (
-        array<image_type,MM>& images,
+        array_type& images,
         std::vector<std::vector<full_object_detection> >& object_locations,
         const image_dataset_file& source,
         std::vector<std::string>& parts_list
     )
     {
+        typedef typename array_type::value_type image_type;
         parts_list.clear();
         images.clear();
         object_locations.clear();
@@ -287,11 +351,10 @@ namespace dlib
 // ----------------------------------------------------------------------------------------
 
     template <
-        typename image_type, 
-        typename MM
+        typename array_type
         >
     std::vector<std::vector<rectangle> > load_image_dataset (
-        array<image_type,MM>& images,
+        array_type& images,
         std::vector<std::vector<full_object_detection> >& object_locations,
         const image_dataset_file& source 
     )
@@ -303,11 +366,10 @@ namespace dlib
 // ----------------------------------------------------------------------------------------
 
     template <
-        typename image_type, 
-        typename MM
+        typename array_type 
         >
     std::vector<std::vector<rectangle> > load_image_dataset (
-        array<image_type,MM>& images,
+        array_type& images,
         std::vector<std::vector<full_object_detection> >& object_locations,
         const std::string& filename
     )
