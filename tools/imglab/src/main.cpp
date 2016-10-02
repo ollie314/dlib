@@ -98,7 +98,7 @@ int split_dataset (
 
     for (unsigned long i = 0; i < data.images.size(); ++i)
     {
-        dlib::image_dataset_metadata::image temp = data.images[i];
+        auto&& temp = data.images[i];
 
         bool has_the_label = false;
         // check for the label we are looking for
@@ -112,24 +112,9 @@ int split_dataset (
         }
 
         if (has_the_label)
-        {
-            std::vector<dlib::image_dataset_metadata::box> boxes;
-            // remove other labels
-            for (unsigned long j = 0; j < temp.boxes.size(); ++j)
-            {
-                if (temp.boxes[j].label == label)
-                {
-                    // put only the boxes with the label we want into boxes
-                    boxes.push_back(temp.boxes[j]);
-                }
-            }
-            temp.boxes = boxes;
             data_with.images.push_back(temp);
-        }
         else
-        {
             data_without.images.push_back(temp);
-        }
     }
 
 
@@ -572,7 +557,7 @@ int resample_dataset(const command_line_parser& parser)
 
     const size_t obj_size = get_option(parser,"cropped-object-size",100*100); 
     const double margin_scale =  get_option(parser,"crop-size",2.5); // cropped image will be this times wider than the object.
-    const long min_object_size = get_option(parser,"min-object-size",1);
+    const unsigned long min_object_size = get_option(parser,"min-object-size",1);
 
     dlib::image_dataset_metadata::dataset data, resampled_data;
     std::ostringstream sout;
@@ -757,12 +742,11 @@ int main(int argc, char** argv)
                                     "the md5 hash of each image file and removing duplicate images. " );
         parser.add_option("rmdiff","Set the ignored flag to true for boxes marked as difficult.");
         parser.add_option("rmtrunc","Set the ignored flag to true for boxes that are partially outside the image.");
-        parser.add_option("shuffle","Randomly shuffle the order of the images listed in file <arg>.");
+        parser.add_option("sort-num-objects","Sort the images listed an XML file so images with many objects are listed first.");
+        parser.add_option("shuffle","Randomly shuffle the order of the images listed in an XML file.");
         parser.add_option("seed", "When using --shuffle, set the random seed to the string <arg>.",1);
         parser.add_option("split", "Split the contents of an XML file into two separate files.  One containing the "
-            "images with objects labeled <arg> and another file with all the other images.  Additionally, the file "
-            "containing the <arg> labeled objects will not contain any other labels other than <arg>. "
-            "That is, the images in the first file are stripped of all labels other than the <arg> labels.",1);
+            "images with objects labeled <arg> and another file with all the other images. ",1);
         parser.add_option("add", "Add the image metadata from <arg1> into <arg2>.  If any of the image "
                                  "tags are in both files then the ones in <arg2> are deleted and replaced with the "
                                  "image tags from <arg1>.  The results are saved into merged.xml and neither <arg1> or "
@@ -774,6 +758,8 @@ int main(int argc, char** argv)
         parser.add_option("cluster", "Cluster all the objects in an XML file into <arg> different clusters and save "
                                      "the results as cluster_###.xml and cluster_###.jpg files.",1);
         parser.add_option("ignore", "Mark boxes labeled as <arg> as ignored.  The resulting XML file is output as a separate file and the original is not modified.",1);
+        parser.add_option("rmlabel","Remove all boxes labeled <arg> and save the results to a new XML file.",1);
+        parser.add_option("rm-if-overlaps","Remove all boxes labeled <arg> if they overlap any box not labeled <arg> and save the results to a new XML file.",1);
 
         parser.set_group_name("Cropping sub images");
         parser.add_option("resample", "Crop out images that are centered on each object in the dataset. "
@@ -790,7 +776,7 @@ int main(int argc, char** argv)
 
         const char* singles[] = {"h","c","r","l","files","convert","parts","rmdiff", "rmtrunc", "rmdupes", "seed", "shuffle", "split", "add", 
                                  "flip", "rotate", "tile", "size", "cluster", "resample", "extract-chips", "min-object-size", "rmempty",
-                                 "crop-size", "cropped-object-size"};
+                                 "crop-size", "cropped-object-size", "rmlabel", "rm-if-overlaps", "sort-num-objects"};
         parser.check_one_time_options(singles);
         const char* c_sub_ops[] = {"r", "convert"};
         parser.check_sub_options("c", c_sub_ops);
@@ -803,6 +789,8 @@ int main(int argc, char** argv)
         parser.check_incompatible_options("c", "files");
         parser.check_incompatible_options("c", "rmdiff");
         parser.check_incompatible_options("c", "rmempty");
+        parser.check_incompatible_options("c", "rmlabel");
+        parser.check_incompatible_options("c", "rm-if-overlaps");
         parser.check_incompatible_options("c", "rmdupes");
         parser.check_incompatible_options("c", "rmtrunc");
         parser.check_incompatible_options("c", "add");
@@ -845,6 +833,7 @@ int main(int argc, char** argv)
         parser.check_incompatible_options("rotate", "extract-chips");
         parser.check_incompatible_options("add", "extract-chips");
         parser.check_incompatible_options("shuffle", "tile");
+        parser.check_incompatible_options("sort-num-objects", "tile");
         parser.check_incompatible_options("convert", "l");
         parser.check_incompatible_options("convert", "files");
         parser.check_incompatible_options("convert", "rename");
@@ -857,6 +846,10 @@ int main(int argc, char** argv)
         parser.check_incompatible_options("rmdiff", "ignore");
         parser.check_incompatible_options("rmempty", "ignore");
         parser.check_incompatible_options("rmempty", "rename");
+        parser.check_incompatible_options("rmlabel", "ignore");
+        parser.check_incompatible_options("rmlabel", "rename");
+        parser.check_incompatible_options("rm-if-overlaps", "ignore");
+        parser.check_incompatible_options("rm-if-overlaps", "rename");
         parser.check_incompatible_options("rmdupes", "rename");
         parser.check_incompatible_options("rmdupes", "ignore");
         parser.check_incompatible_options("rmtrunc", "rename");
@@ -994,6 +987,80 @@ int main(int argc, char** argv)
             return EXIT_SUCCESS;
         }
 
+        if (parser.option("rmlabel"))
+        {
+            if (parser.number_of_arguments() != 1)
+            {
+                cerr << "The --rmlabel option requires you to give one XML file on the command line." << endl;
+                return EXIT_FAILURE;
+            }
+
+            dlib::image_dataset_metadata::dataset data;
+            load_image_dataset_metadata(data, parser[0]);
+
+            const auto label = parser.option("rmlabel").argument();
+
+            for (auto&& img : data.images)
+            {
+                std::vector<dlib::image_dataset_metadata::box> boxes;
+                for (auto&& b : img.boxes)
+                {
+                    if (b.label != label)
+                        boxes.push_back(b);
+                }
+                img.boxes = boxes;
+            }
+
+            save_image_dataset_metadata(data, parser[0] + ".rmlabel-"+label+".xml");
+            return EXIT_SUCCESS;
+        }
+
+        if (parser.option("rm-if-overlaps"))
+        {
+            if (parser.number_of_arguments() != 1)
+            {
+                cerr << "The --rm-if-overlaps option requires you to give one XML file on the command line." << endl;
+                return EXIT_FAILURE;
+            }
+
+            dlib::image_dataset_metadata::dataset data;
+            load_image_dataset_metadata(data, parser[0]);
+
+            const auto label = parser.option("rm-if-overlaps").argument();
+
+            test_box_overlap overlaps(0.5);
+
+            for (auto&& img : data.images)
+            {
+                std::vector<dlib::image_dataset_metadata::box> boxes;
+                for (auto&& b : img.boxes)
+                {
+                    if (b.label != label)
+                    {
+                        boxes.push_back(b);
+                    }
+                    else
+                    {
+                        bool has_overlap = false;
+                        for (auto&& b2 : img.boxes)
+                        {
+                            if (b2.label != label && overlaps(b2.rect, b.rect))
+                            {
+                                has_overlap = true;
+                                break;
+                            }
+                        }
+                        if (!has_overlap)
+                            boxes.push_back(b);
+                    }
+                }
+                img.boxes = boxes;
+            }
+
+            save_image_dataset_metadata(data, parser[0] + ".rm-if-overlaps-"+label+".xml");
+            return EXIT_SUCCESS;
+        }
+
         if (parser.option("rmdupes"))
         {
             if (parser.number_of_arguments() != 1)
@@ -1088,7 +1155,7 @@ int main(int argc, char** argv)
         {
             if (parser.number_of_arguments() != 1)
             {
-                cerr << "The -shuffle option requires you to give one XML file on the command line." << endl;
+                cerr << "The --shuffle option requires you to give one XML file on the command line." << endl;
                 return EXIT_FAILURE;
             }
 
@@ -1098,6 +1165,22 @@ int main(int argc, char** argv)
             const string seed = get_option(parser, "seed", default_seed);
             dlib::rand rnd(seed);
             randomize_samples(data.images, rnd);
+            save_image_dataset_metadata(data, parser[0]);
+            return EXIT_SUCCESS;
+        }
+
+        if (parser.option("sort-num-objects"))
+        {
+            if (parser.number_of_arguments() != 1)
+            {
+                cerr << "The --sort-num-objects option requires you to give one XML file on the command line." << endl;
+                return EXIT_FAILURE;
+            }
+
+            dlib::image_dataset_metadata::dataset data;
+            load_image_dataset_metadata(data, parser[0]);
+            std::sort(data.images.rbegin(),  data.images.rend(), 
+                [](const image_dataset_metadata::image& a, const image_dataset_metadata::image& b) { return a.boxes.size() < b.boxes.size(); });
             save_image_dataset_metadata(data, parser[0]);
             return EXIT_SUCCESS;
         }
