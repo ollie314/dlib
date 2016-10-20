@@ -13,7 +13,7 @@ include(cmake_utils/use_cpp_11.cmake)
 
 
 set(CPACK_PACKAGE_VERSION_MAJOR "19")
-set(CPACK_PACKAGE_VERSION_MINOR "1")
+set(CPACK_PACKAGE_VERSION_MINOR "2")
 set(CPACK_PACKAGE_VERSION_PATCH "99")
 set(VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH})
 # Set DLIB_VERSION in the including CMake file so they can use it to do whatever they want. 
@@ -458,6 +458,10 @@ if (NOT TARGET dlib)
       if (DLIB_USE_CUDA)
          find_package(CUDA 7.5)
 
+         if (CUDA_FOUND AND MSVC AND NOT CUDA_CUBLAS_LIBRARIES AND "${CMAKE_SIZEOF_VOID_P}" EQUAL "4")
+            message(WARNING "You have CUDA installed, but we can't use it unless you put visual studio in 64bit mode.")
+            set(CUDA_FOUND 0)
+         endif()
 
          if (CUDA_FOUND AND COMPILER_CAN_DO_CPP_11)
 
@@ -477,6 +481,7 @@ if (NOT TARGET dlib)
                            CMAKE_FLAGS "-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
                                        "-DCMAKE_INCLUDE_PATH=${CMAKE_INCLUDE_PATH}"
                                        "-DCMAKE_LIBRARY_PATH=${CMAKE_LIBRARY_PATH}"
+                                       "-DCUDA_HOST_COMPILER=${CUDA_HOST_COMPILER}"
                            )
                if (NOT cuda_test_compile_worked)
                   message(STATUS "*** CUDA was found but your compiler failed to compile a simple CUDA program so dlib isn't going to use CUDA. ***")
@@ -487,6 +492,7 @@ if (NOT TARGET dlib)
                               CMAKE_FLAGS "-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
                                           "-DCMAKE_INCLUDE_PATH=${CMAKE_INCLUDE_PATH}"
                                           "-DCMAKE_LIBRARY_PATH=${CMAKE_LIBRARY_PATH}"
+                                          "-DCUDA_HOST_COMPILER=${CUDA_HOST_COMPILER}"
                                           )
                   if (cudnn_test_compile_worked)
                      message(STATUS "Found cuDNN: " ${cudnn})
